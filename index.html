@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title>Theia</title>
+
+	<!-- CodeMirror core CSS & Lua mode -->
+	<link rel="stylesheet"
+				href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.css">
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/mode/lua/lua.min.js"></script>
+
+	<style>
+		:root {
+			--variables-color: #28a745;
+			--functions-color: #dc3545;
+			--io-color: #ffc107;
+			--control-color: #17a2b8;
+			--other-color: #6c757d;
+		}
+
+		body {
+			margin: 0;
+			font-family: Arial, sans-serif;
+			display: flex;
+			height: 100vh;
+		}
+
+		#sidebar {
+			width: 200px;
+			background-color: #f1f1f1;
+			padding: 10px;
+			box-sizing: border-box;
+			border-right: 2px solid #ccc;
+			resize: horizontal;
+			overflow: auto;
+			min-width: 100px;
+			max-width: 400px;
+		}
+
+		.category {
+			margin-top: 15px;
+			margin-bottom: 5px;
+			font-weight: bold;
+			color: #333;
+			border-bottom: 1px solid #aaa;
+			padding-bottom: 3px;
+		}
+
+		.block {
+			background-color: #007bff;
+			color: white;
+			padding: 10px;
+			margin: 5px 0;
+			border-radius: 5px;
+			cursor: grab;
+			user-select: none;
+			transition: background-color 0.3s ease, transform 0.2s ease;
+		}
+		.block:hover { transform: scale(1.05); }
+		.block:active { transform: scale(0.98); }
+
+		.variables { background-color: var(--variables-color); }
+		.functions { background-color: var(--functions-color); }
+		.io        { background-color: var(--io-color); color: #333; }
+		.control   { background-color: var(--control-color); }
+		.other     { background-color: var(--other-color); }
+		.block:hover { filter: brightness(85%); }
+
+		#main {
+			flex: 1;
+			padding: 20px;
+			position: relative;
+		}
+
+		#wrapper {
+			position: relative;
+			width: 100%;
+			height: 100%;
+		}
+
+		/* original textarea style—gets hidden by CodeMirror */
+		textarea {
+			width: 100%;
+			height: 100%;
+			font-size: 16px;
+			line-height: 20px;
+			padding: 8px;
+			white-space: pre;
+			box-sizing: border-box;
+			font-family: "Arial", monospace;
+		}
+
+		/* mirror textarea style on CodeMirror */
+		.CodeMirror {
+			width: 100%;
+			height: 100%;
+			font-size: 16px;
+			line-height: 20px;
+			padding: 8px;
+			box-sizing: border-box;
+			font-family: "Arial", monospace;
+			white-space: pre;
+		}
+		.CodeMirror-scroll {
+			overflow: auto;
+		}
+
+		#highlight {
+			pointer-events: none;
+			position: absolute;
+			background: rgba(255, 230, 0, 0.3);
+			width: 100%;
+			z-index: 3;
+			display: none;
+		}
+
+		#prompt {
+			display: none;
+			position: fixed;
+			top: 50%;
+			left: 50%;
+			transform: translate(-50%, -50%);
+			background: white;
+			padding: 20px;
+			border-radius: 8px;
+			box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+			z-index: 1000;
+			width: 400px;
+			max-width: 90%;
+		}
+
+		.prompt-field {
+			margin: 15px 0;
+		}
+		.prompt-field label {
+			display: block;
+			margin-bottom: 8px;
+			font-weight: 500;
+		}
+		.prompt-field input,
+		.prompt-field textarea {
+			width: 85%;
+			padding: 8px;
+			border: 1px solid #ddd;
+			border-radius: 4px;
+			font-family: "Arial", monospace;
+		}
+		.prompt-field textarea {
+			min-height: 100px;
+			resize: vertical;
+		}
+
+		#prompt-actions {
+			display: flex;
+			justify-content: flex-end;
+			gap: 10px;
+			margin-top: 20px;
+		}
+		#prompt button {
+			padding: 8px 16px;
+			border: none;
+			border-radius: 4px;
+			cursor: pointer;
+		}
+		#submitInput { background-color: #007bff; color: white; }
+		#closePrompt  { background-color: #6c757d; color: white; }
+	</style>
+</head>
+<body>
+	<div id="sidebar">
+		<h3>Theia</h3>
+		<div class="category">Variables</div>
+		<div class="block variables" draggable="true"
+				 data-text="local ${name} = ${value}"
+				 data-description="Create a new variable">Variable Declaration</div>
+		<div class="block variables" draggable="true"
+				 data-text="${name} = ${value}"
+				 data-description="Variable assignment">Variable Assignment</div>
+		<div class="block variables" draggable="true"
+				 data-text="local ${name} = function(${params})&#10;&#13;&#10;&#13;end"
+				 data-description="Function variable">Function Variable</div>
+
+		<div class="category">Functions</div>
+		<div class="block functions" draggable="true"
+				 data-text="function ${name}(${params})&#10;&#13;&#10;&#13;end"
+				 data-description="Create a function">Function</div>
+		<div class="block functions" draggable="true"
+				 data-text="return ${value}"
+				 data-description="Return a value">Return</div>
+		<div class="block functions" draggable="true"
+				 data-text="${name}(${args})"
+				 data-description="Call a function">Function Call</div>
+
+		<div class="category">I/O Operations</div>
+		<div class="block io" draggable="true"
+				 data-text="print(${message})"
+				 data-description="Print a message">Print</div>
+		<div class="block io" draggable="true"
+				 data-text="input(${prompt})"
+				 data-description="Get user input">Input</div>
+
+		<div class="category">Control Flow</div>
+		<div class="block control" draggable="true"
+				 data-text="if ${condition} then&#10;&#13;&#10;&#13;end"
+				 data-description="If statement">If</div>
+		<div class="block control" draggable="true"
+				 data-text="for ${var} = ${start}, ${end} do&#10;&#13;&#10;&#13;end"
+				 data-description="For loop">For Loop</div>
+		<div class="block control" draggable="true"
+				 data-text="while ${condition} do&#10;&#13;&#10;&#13;end"
+				 data-description="While loop">While Loop</div>
+
+		<div class="category">Comparisons</div>
+		<div class="block comparison" draggable="true" data-text="==">==</div>
+		<div class="block comparison" draggable="true" data-text="~=">=</div>
+		<div class="block comparison" draggable="true" data-text=">">></div>
+		<div class="block comparison" draggable="true" data-text=">=">>=</div>
+		<div class="block comparison" draggable="true" data-text="<"><</div>
+		<div class="block comparison" draggable="true" data-text="<="><=</div>
+
+		<div class="category">Other</div>
+		<div class="block other" draggable="true"
+				 data-text="-- ${comment}"
+				 data-description="Add a comment">Comment</div>
+		<div class="block other" draggable="true"
+				 data-text="table.insert(${table}, ${value})"
+				 data-description="Add to table">Table Insert</div>
+	</div>
+
+	<div id="main">
+		<div id="wrapper">
+			<div id="highlight"></div>
+			<textarea id="textbox" spellcheck="false">-- Your code here
+-- Drag blocks from the sidebar</textarea>
+		</div>
+	</div>
+
+	<div id="prompt">
+		<p id="description"></p>
+		<div id="promptFields"></div>
+		<div id="prompt-actions">
+			<button id="closePrompt">Cancel</button>
+			<button id="submitInput">Insert</button>
+		</div>
+	</div>
+
+	<script>
+		document.addEventListener('DOMContentLoaded', function() {
+			// Initialize CodeMirror on the textarea
+			var editor = CodeMirror.fromTextArea(
+				document.getElementById('textbox'),
+				{
+					mode:          'text/x-lua',
+					lineNumbers:   true,
+					matchBrackets: true,
+					theme:         'default',
+					dragDrop: false,
+				}
+			);
+
+			// Elements for drag-and-drop UI
+			var cmWrapper      = editor.getWrapperElement();
+			var cmScroller     = cmWrapper.querySelector('.CodeMirror-scroll');
+			var highlight      = document.getElementById('highlight');
+			var prompt         = document.getElementById('prompt');
+			var descriptionTxt = document.getElementById('description');
+			var promptFields   = document.getElementById('promptFields');
+			var submitBtn      = document.getElementById('submitInput');
+			var closeBtn       = document.getElementById('closePrompt');
+
+			// Compute line height and set highlight height
+			var sampleLine = cmWrapper.querySelector('.CodeMirror-code .CodeMirror-line');
+			var lineHeight = parseInt(window.getComputedStyle(sampleLine).lineHeight, 10) || 20;
+			highlight.style.height = lineHeight + 'px';
+
+			var insertionLine = null,
+					insertionTpl  = '',
+					placeholders  = [],
+					canDrop       = true;
+			var multilinePlaceholders = ['body','loopbody','functionbody'];
+
+			// Dragstart on blocks
+			document.querySelectorAll('.block').forEach(function(block) {
+				block.addEventListener('dragstart', function(e) {
+					var tpl = block.dataset.text.replace(/\$\{/g,'{').replace(/\}/g,'}');
+					e.dataTransfer.setData('text/plain', tpl);
+					e.dataTransfer.setData('description', block.dataset.description);
+				});
+			});
+
+			// Dragover
+			cmWrapper.addEventListener('dragover', function(e) {
+				e.preventDefault();
+				if (!canDrop) return;
+
+				var rect      = cmWrapper.getBoundingClientRect();
+				var scrollTop = cmScroller.scrollTop;
+				var dropY     = e.clientY - rect.top + scrollTop;
+				var line      = Math.floor(dropY / lineHeight);
+
+				highlight.style.top     = (line * lineHeight - scrollTop + 8) + 'px';
+				highlight.style.display = 'block';
+			});
+
+			// Dragleave
+			cmWrapper.addEventListener('dragleave', function() {
+				highlight.style.display = 'none';
+			});
+
+			// Drop
+			cmWrapper.addEventListener('drop', function(e) {
+				e.preventDefault();
+				highlight.style.display = 'none';
+
+				var textTpl    = e.dataTransfer.getData('text/plain');
+				var desc       = e.dataTransfer.getData('description');
+				var rect       = cmWrapper.getBoundingClientRect();
+				var scrollTop  = cmScroller.scrollTop;
+				var dropY      = e.clientY - rect.top + scrollTop;
+				var lineNumber = Math.floor(dropY / lineHeight);
+
+
+				// find placeholders
+				placeholders = [];
+				textTpl.replace(/\{(\w+)\}/g, function(_, name) {
+					placeholders.push(name);
+				});
+
+				if (placeholders.length) {
+					prompt.style.display = 'block';
+					descriptionTxt.textContent = desc;
+					canDrop = false;
+					insertionLine = lineNumber;
+					insertionTpl  = textTpl;
+					placeholders = Array.from(new Set(placeholders));
+
+					promptFields.innerHTML = '';
+					placeholders.forEach(function(ph) {
+						var isMulti = multilinePlaceholders.includes(ph);
+						var field = document.createElement('div');
+						field.className = 'prompt-field';
+						field.innerHTML = '<label>'+ph+':</label>' +
+							(isMulti
+								? '<textarea data-ph="'+ph+'" placeholder="Enter '+ph+'…"></textarea>'
+								: '<input data-ph="'+ph+'" placeholder="Enter '+ph+'…">');
+						promptFields.appendChild(field);
+					});
+				} else {
+					insertTextAtLine(textTpl, lineNumber);
+				}
+			});
+
+			// Cancel prompt
+			closeBtn.addEventListener('click', function() {
+				prompt.style.display = 'none';
+				canDrop = true;
+			});
+
+			// Submit prompt
+			submitBtn.addEventListener('click', function() {
+				var filled = insertionTpl;
+				placeholders.forEach(function(ph) {
+					var input = promptFields.querySelector('[data-ph="'+ph+'"]');
+					var val   = input.value.trim();
+					if (val) {filled = filled.replace('{'+ph+'}', val)}else{
+						filled = filled.replace('{'+ph+'}', "")
+					}
+				});
+				insertTextAtLine(filled, insertionLine);
+				prompt.style.display = 'none';
+				canDrop = true;
+			});
+
+			// Insert into editor at line
+			function insertTextAtLine(text, line) {
+				editor.replaceRange(text, {line: line, ch: 0});
+				editor.focus();
+				editor.setCursor({line: line, ch: 0});
+			}
+
+		});
+	</script>
+</body>
+</html>
